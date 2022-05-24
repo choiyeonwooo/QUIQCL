@@ -127,7 +127,7 @@ class Raman_PID_Controller():
         cmd = 'WRITE DDS REG'
         cmd_up = 'UPDATE'
         
-        # self.fpga.send_command(cmd_up)
+        self.fpga.send_command(cmd_up)
         self.fpga.send_mod_BTF_int_list(self.dds.make_9int_list(self.dds.make_header_string(0x040C, 2)+('%04x' % current), ch1, ch2)) 
         #make_9int_list uses 9byte -> first 1byte for data info. last 8byte for data
         #current doesn't require 8byte, so only 2byte + 2byte used and last 4byte filled with zeros.

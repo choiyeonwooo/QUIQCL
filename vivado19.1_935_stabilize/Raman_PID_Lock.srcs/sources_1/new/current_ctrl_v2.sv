@@ -936,7 +936,7 @@ module main(
                             // PID control for DDS port1 (tracking Photo diode signal of pulse laser)
                             if(adc_out_buf > setPoint) begin
                                 Err_sign <= 1'b0;
-                                if(PID_mode == 1'b0)DDS_buffer[FTW_WIDTH : 1] <= current_FTW_tracking[FTW_WIDTH : 1] + (K0 * difference) - (K1 * difference_buf) + (K2 * difference_buf_2);
+                                DDS_buffer[FTW_WIDTH : 1] <= current_FTW_tracking[FTW_WIDTH : 1] + (K0 * difference) - (K1 * difference_buf) + (K2 * difference_buf_2);
                             end
 
                             else begin
@@ -945,24 +945,22 @@ module main(
                             end
 
                             DDS_buffer[DDS_WIDTH : FTW_WIDTH + 1] <= 16'h61AB;   //LSB addr=0x1AB {W,W1,W0} = {0,1,1} 6bytes of data transfer(48bit)
-                            // else if (PID_mode == 1'b1)  DDS_buffer[DDS_WIDTH : FTW_WIDTH + 1] <= 16'h240C; //LSB addr=0x40C {W,W1,W0} = {0,0,1} 2bytes of data transfer(10bit)
-                            // else if (PID_mode == 2'b10) implement for phase PID control !!
                             DDS_buffer[DDS_WIDTH + 4 : DDS_WIDTH + 1] <= 4'b1000; // data_length = 8byte = DDS_data byte (2byte for header + 4byte for raw data)
                         end
 
-                        else begin
-                            DDS_buffer[DDS_WIDTH + 8:1] <= user_DDS_buffer[DDS_WIDTH + 8:1];
-                        end   
+                        // else begin
+                        //     DDS_buffer[DDS_WIDTH + 8:1] <= user_DDS_buffer[DDS_WIDTH + 8:1];
+                        // end   
                     end
 
-                    else begin
-                        DDS_buffer[DDS_WIDTH + 8:1] <= user_DDS_buffer[DDS_WIDTH + 8:1];
-                    end
+                    // else begin
+                    //     DDS_buffer[DDS_WIDTH + 8:1] <= user_DDS_buffer[DDS_WIDTH + 8:1];
+                    // end
                 end
                 /////////////////////////////////////////////////////////////////////////
                 // trigger WTR
                 else if((DDS_busy_1 == 0) && (DDS_busy_2 == 0)) begin
-                    if(COMP_on) begin 
+                    if(COMP_on == 1'b1) begin 
                         // update tracking frequency first
                         dds_data_ready_1 <= 1'b1;
                         dds_data_ready_2 <= 1'b0;
@@ -970,12 +968,12 @@ module main(
                         current_FTW_tracking <= DDS_buffer[FTW_WIDTH:1];
                     end
 
-                    else begin // normal dds write case
-                        if((DDS_buffer[DDS_WIDTH + 4 : DDS_WIDTH + 1] == 4'b1000) && (DDS_buffer[DDS_WIDTH + 6] == 1'b1) && (DDS_buffer[DDS_WIDTH:DDS_WIDTH-15]==16'h61AB)) current_FTW_tracking <= DDS_buffer[FTW_WIDTH:1]; // save current control variable value for photodiode tracking frequency
-                        if((DDS_buffer[DDS_WIDTH + 4 : DDS_WIDTH + 1] == 4'b1000) && (DDS_buffer[DDS_WIDTH + 5] == 1'b1) && (DDS_buffer[DDS_WIDTH:DDS_WIDTH-15]==16'h61AB)) current_FTW_AOM <= DDS_buffer[FTW_WIDTH:1]; // save currentcontrol variable value for AOM frequency
-                        dds_data_ready_1 <= DDS1_update;
-                        dds_data_ready_2 <= DDS2_update;
-                    end
+                    // else begin // normal dds write case
+                    //     if((DDS_buffer[DDS_WIDTH + 6] == 1'b1) && (DDS_buffer[DDS_WIDTH:DDS_WIDTH-15]==16'h61AB)) current_FTW_tracking <= DDS_buffer[FTW_WIDTH:1]; // save current control variable value for photodiode tracking frequency
+                    //     if((DDS_buffer[DDS_WIDTH + 5] == 1'b1) && (DDS_buffer[DDS_WIDTH:DDS_WIDTH-15]==16'h61AB)) current_FTW_AOM <= DDS_buffer[FTW_WIDTH:1]; // save currentcontrol variable value for AOM frequency
+                    //     dds_data_ready_1 <= DDS_buffer[DDS_WIDTH+6];
+                    //     dds_data_ready_2 <= DDS_buffer[DDS_WIDTH+5];
+                    // end
                 end
                 /////////////////////////////////////////////////////////////////////////
                 else begin // WTR triggered
@@ -1004,14 +1002,8 @@ module main(
                 end
                 
                 else if((DDS_busy_1 == 0) && (DDS_busy_2 == 0)) begin // trigger WTR
-                    if(PID_mode == 1'b0) begin 
-                        dds_data_ready_1 <= 1'b1; // PD tracking DDS first
-                        dds_data_ready_2 <= 1'b0;
-                    end
-                    else if (PID_mode == 1'b1) begin
-                        dds_data_ready_1 <= 1'b0; // not required
-                        dds_data_ready_2 <= 1'b1;
-                    end
+                    dds_data_ready_1 <= 1'b1; // PD tracking DDS first
+                    dds_data_ready_2 <= 1'b0;
                 end
                 
                 else begin // WTR triggered
