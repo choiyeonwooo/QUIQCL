@@ -19,10 +19,6 @@
 //
 //////////////////////////////////////////////////////////////////////////////////
 module WriteToRegister
-	#(parameter FTW_WIDTH = 6'd48,
-	parameter FSC_WIDTH = 4'd10,
-	parameter PHASE_WIDTH = 4'd14
-	)
 (DDS_clock, dataLength, registerData, registerDataReady, wr_rcsbar, /*rsclk,*/ rsdio, 
 								countmonitor, registerDataReadymonitor, internalmonitor, busy, pidMode); // extendedDataReady);
 			

@@ -198,6 +198,9 @@ module main(
     // DDS implementation
     /////////////////////////////////////////////////////////////////
     parameter CMD_DDS_WRITE = "WRITE DDS REG";
+    parameter CMD_DDS_START = "DDS START";
+    parameter CMD_DDS_STOP = "DDS STOP";
+
     // control variable width
     parameter FTW_WIDTH = 6'd48; // Frequency tuning word for DDS uses 48 bit
     parameter FSC_WIDTH = 4'd10; // Full Scale Current
@@ -253,16 +256,10 @@ module main(
     WriteToRegister WTR1(.DDS_clock(DDS_clock), .dataLength(data_length[3:0]), .registerData(DDS_data), .registerDataReady(dds_data_ready_1), .busy(DDS_busy_1),
                                 .wr_rcsbar(rcsbar_1), /*.rsclk(rsclk00),*/ .rsdio(rsdio_1), .pidMode(PID_mode) ); //, .extendedDataReady(extendedDataReady00));   //, .countmonitor(monitor00), .registerDataReadymonitor(RDataReadymonitor00)
                                 //);
-    defparam WTR1.FTW_WIDTH = FTW_WIDTH;
-    defparam WTR1.FSC_WIDTH = FSC_WIDTH;
-    defparam WTR1.PHASE_WIDTH = PHASE_WIDTH;
 
     WriteToRegister WTR2(.DDS_clock(DDS_clock), .dataLength(data_length[3:0]), .registerData(DDS_data), .registerDataReady(dds_data_ready_2), .busy(DDS_busy_2),
                                 .wr_rcsbar(rcsbar_2), /*.rsclk(rsclk00),*/ .rsdio(rsdio_2), .pidMode(PID_mode) ); //, .extendedDataReady(extendedDataReady00));   //, .countmonitor(monitor00), .registerDataReadymonitor(RDataReadymonitor00)
                                 //);
-    defparam WTR2.FTW_WIDTH = FTW_WIDTH;
-    defparam WTR2.FSC_WIDTH = FSC_WIDTH;
-    defparam WTR2.PHASE_WIDTH = PHASE_WIDTH;
 
     reg DDS1_powerdown, DDS2_powerdown, DDS_reset;
    
@@ -281,8 +278,6 @@ module main(
     parameter ADC_OUTPUT_WIDTH = 16;  // XADC_output = 16bit (12bit data + 4bit note)      
     
     wire [ADC_OUTPUT_WIDTH - 1:0] adc_out;
-    wire [15:0] adc_in;
-    wire [6:0] adc_addr;
     reg ADC_on;
    
     XADC xadc(
@@ -491,6 +486,11 @@ module main(
     parameter CMD_REVERSE_FEEDBACK = "REVERSE";
     reg reverse_feedback; 
 
+    // Beam geometry selection: Sinble Pass or Double Pass?
+    parameter CMD_SINGLE_PASS = "SINGLE PASS";
+    parameter CMD_DOUBLE_PASS = "DOUBLE PASS";
+    reg is_single_pass;
+
     ////////////////////////////////////////////////////////
     //////// Connection state between FPGA and HOST computer
     ////////////////////////////////////////////////////////
@@ -505,12 +505,13 @@ module main(
     
     reg update_request; // Send update sign to operation FSM  
     reg update_start;
+
     reg load_start, load_large_start; // to send data to HOST (adc output & DDS current/frequency )
     reg load_finish, load_large_finish;
     reg DDS_ready_flag;
-    reg DDS_user_setting;
     reg [48 + 48 + 16 - 1:0] load_data_buffer; // data_buffer : PD tracking CVAR + AOM CVAR + ADC data (112bit < 15byte) -> transfer via tx_buffer1
-    reg [42:0] AOM_update; // update frequency/current with this value and route in to DDS_buffer
+    wire [42:0] AOM_update; // update frequency/current with this value and route in to DDS_buffer
+    assign AOM_update = ((N * K0 * difference)>>1) - ((N * K1 * difference_buf)>>1) + ((N * K2 * difference_buf_2)>>1);
     initial begin
         con_state <= CON_WAIT;
         update_request <= 1'b0;
@@ -523,6 +524,7 @@ module main(
         load_data_buffer <= 0;
         load_large_data_buffer <= 0;
         reverse_feedback <= 1'b0;
+        is_single_pass <= 1'b0;
     end
    
     always @ (posedge CLK100MHZ)              
@@ -602,7 +604,7 @@ module main(
                             con_state <= CON_LOAD_LARGE;
                             load_large_start <= 1'b1;
                         end
-                      
+
                         else begin
                             con_state <= CON_UNKNOWN;
                         end
@@ -624,7 +626,7 @@ module main(
 
                     else if(update_start == 1) begin // to update only when op_state is on wait
                         update_request <= 1'b0;
-                        con_state <= CON_WAIT;
+                        con_state <= CON_WAIT;  
 
                         // COMMAND "WRITE DDS REG"
                         if ((CMD_Length == $bits(CMD_DDS_WRITE)/8) && (CMD_Buffer[$bits(CMD_DDS_WRITE):1] == CMD_DDS_WRITE)) begin
@@ -635,25 +637,34 @@ module main(
                             end
 
                             else if((DDS1_update != 0) || (DDS2_update != 0)) begin
-                                user_DDS_buffer[DDS_WIDTH+8:1] <= BTF_Buffer[DDS_WIDTH+8:1]; 
+                                user_DDS_buffer <= BTF_Buffer[DDS_WIDTH+8:1]; 
                                 user_DDS_setting <= 1'b1;
                                 // BTF_Buffer contains..
                                 // '#'+'digits # of following info'+'byte # of raw data'+'raw data'
                                 // raw data: [DDS instruction word][frequency/current/phase all in 48bit]
                             end
-                        end    
+                        end  
+                        // COMMAND "DDS START"
+                        else if ((CMD_Length == $bits(CMD_DDS_START)/8) && (CMD_Buffer[$bits(CMD_DDS_START):1] == CMD_DDS_START)) begin
+                            DDS_on <= 1'b1;
+                        end
+    
+                        // COMMAND "DDS STOP"
+                        else if ((CMD_Length == $bits(CMD_DDS_STOP)/8) && (CMD_Buffer[$bits(CMD_DDS_STOP):1] == CMD_DDS_STOP)) begin
+                            DDS_on <= 1'b0;
+                        end
 
                         // COMMAND "ADC START"
-                        else if((CMD_Length == $bits(CMD_ADC_START)/8) && (CMD_Buffer[$bits(CMD_ADC_START):1] == CMD_ADC_START)) begin
-                            // if (BTF_Length != (ADC_DATA_WIDTH/8)) begin
-                            //     TX_buffer1[1:13*8] <= {"Wrong length", BTF_Length[7:0]}; // Assuming that BTF_Length is less than 256
-                            //     TX_buffer1_length[TX_BUFFER1_LENGTH_WIDTH-1:0] <= 'd13;
-                            //     TX_buffer1_ready <= 1'b1;
-                            // end
-                            // else begin
+                        if((CMD_Length == $bits(CMD_ADC_START)/8) && (CMD_Buffer[$bits(CMD_ADC_START):1] == CMD_ADC_START)) begin
+                            if (BTF_Length != (ADC_DATA_WIDTH/8)) begin
+                                TX_buffer1[1:13*8] <= {"Wrong length", BTF_Length[7:0]}; // Assuming that BTF_Length is less than 256
+                                TX_buffer1_length[TX_BUFFER1_LENGTH_WIDTH-1:0] <= 'd13;
+                                TX_buffer1_ready <= 1'b1;
+                            end
+                            else begin
                                 // ADC_buffer[16:1] <= BTF_Buffer[ADC_DATA_WIDTH:1]; // not required if XADC used
-                            ADC_on <= 1'b1; // read ADC voltage
-                            // end
+                                ADC_on <= 1'b1; // read ADC voltage
+                            end
                         end
 
                         // COMMAND "ADC STOP"
@@ -663,14 +674,15 @@ module main(
 
                         // COMMAND "ADC RANGE"              
                         else if((CMD_Length == $bits(CMD_ADC_RANGE)/8) && (CMD_Buffer[$bits(CMD_ADC_RANGE):1] == CMD_ADC_RANGE)) begin
-                            // if (BTF_Length != (ADC_DATA_WIDTH/8)) begin
-                            //     TX_buffer1[1:13*8] <= {"Wrong length", BTF_Length[7:0]}; // Assuming that BTF_Length is less than 256
-                            //     TX_buffer1_length[TX_BUFFER1_LENGTH_WIDTH-1:0] <= 'd13;
-                            //     TX_buffer1_ready <= 1'b1;
-                            // end    
-                            // else begin
+                            if (BTF_Length != (ADC_DATA_WIDTH/8)) begin
+                                TX_buffer1[1:13*8] <= {"Wrong length", BTF_Length[7:0]}; // Assuming that BTF_Length is less than 256
+                                TX_buffer1_length[TX_BUFFER1_LENGTH_WIDTH-1:0] <= 'd13;
+                                TX_buffer1_ready <= 1'b1;
+                            end    
+                            else begin
                                 // ADC_buffer[16:1] <= BTF_Buffer[ADC_DATA_WIDTH:1]; // not required if XADC used
-                            ADC_on <= 1'b1;
+                                ADC_on <= 1'b1;
+                            end
                         end  
 
                         // COMMAND "ADC SETPOINT"
@@ -754,6 +766,14 @@ module main(
 
                         else if((CMD_Length == $bits(CMD_REVERSE_FEEDBACK)/8) && (CMD_Buffer[$bits(CMD_REVERSE_FEEDBACK):1] == CMD_REVERSE_FEEDBACK)) begin
                             reverse_feedback <= 1'b1;
+                        end
+
+                        else if((CMD_Length == $bits(CMD_SINGLE_PASS)/8) && (CMD_Buffer[$bits(CMD_SINGLE_PASS):1] == CMD_SINGLE_PASS)) begin
+                            is_single_pass <= 1'b1;
+                        end
+
+                        else if((CMD_Length == $bits(CMD_DOUBLE_PASS)/8) && (CMD_Buffer[$bits(CMD_DOUBLE_PASS):1] == CMD_DOUBLE_PASS)) begin
+                            is_single_pass <= 1'b0;
                         end
                     end
                 end
@@ -852,15 +872,16 @@ module main(
                     load_large_finish <= 1'b1;
                 end
                 
-                else if(user_DDS_setting == 1'b1) begin
-                    if((^user_DDS_buffer[DDS_WIDTH+6:DDS_WIDTH+5])==1) begin
-                        DDS_buffer <= user_DDS_buffer;
-                        op_state <= OP_USER_DDS_SETTING;
-                        dds_data_ready_1 <= user_DDS_buffer[DDS_WIDTH+6];
-                        dds_data_ready_2 <= user_DDS_buffer[DDS_WIDTH+5];
-                    end
-                    else op_state <= OP_WAIT;
-                end
+                // else if(user_DDS_setting == 1'b1) begin
+                //     if((user_DDS_buffer[DDS_WIDTH+6]==1'b1)|(user_DDS_buffer[DDS_WIDTH+5]==1'b1)) begin
+                //     // if((^user_DDS_buffer[DDS_WIDTH+6:DDS_WIDTH+5])==1) begin
+                //         DDS_buffer <= user_DDS_buffer;
+                //         op_state <= OP_USER_DDS_SETTING;
+                //         dds_data_ready_1 <= user_DDS_buffer[DDS_WIDTH+6];
+                //         dds_data_ready_2 <= user_DDS_buffer[DDS_WIDTH+5];
+                //     end
+                //     else op_state <= OP_WAIT;
+                // end
 
                 else begin
                     update_start <= 1'b0;
@@ -885,6 +906,9 @@ module main(
                             FIFO_buffer[ADC_length_send*FIFO_length_send-1:ADC_length_send] <= FIFO_buffer[ADC_length_send*FIFO_length_send-ADC_length_send-1:0];
                             large_buffer_flag<=0;
                         end
+                    end
+                    else if (DDS_on == 1'b1) begin
+                        op_state <= OP_DDS;
                     end
                 end
             end
@@ -928,57 +952,76 @@ module main(
             end
             
             OP_DDS: begin
-                if(DDS_ready_flag == 0) begin
-                    DDS_ready_flag <= 1'b1;
+                if(PID_mode == 1'b0) begin
+                    if(DDS_ready_flag == 0) begin
+                        DDS_ready_flag <= 1'b1;
 
-                    if (COMP_on == 1) begin
-                        if(!const_shoot) begin               
-                            // PID control for DDS port1 (tracking Photo diode signal of pulse laser)
-                            if(adc_out_buf > setPoint) begin
-                                Err_sign <= 1'b0;
-                                DDS_buffer[FTW_WIDTH : 1] <= current_FTW_tracking[FTW_WIDTH : 1] + (K0 * difference) - (K1 * difference_buf) + (K2 * difference_buf_2);
+                        if (COMP_on == 1) begin
+                            if(!const_shoot) begin               
+                                // PID control for DDS port1 (tracking Photo diode signal of pulse laser)
+                                if(adc_out_buf > setPoint) begin
+                                    Err_sign <= 1'b0;
+                                    DDS_buffer[FTW_WIDTH : 1] <= current_FTW_tracking[FTW_WIDTH : 1] + (K0 * difference) - (K1 * difference_buf) + (K2 * difference_buf_2);
+                                end
+
+                                else begin
+                                    Err_sign <= 1'b1;
+                                    DDS_buffer[FTW_WIDTH : 1] <= current_FTW_tracking[FTW_WIDTH : 1] - (K0 * difference) + (K1 * difference_buf) - (K2 * difference_buf_2);
+                                end
+
+                                DDS_buffer[DDS_WIDTH : FTW_WIDTH + 1] <= 16'h61AB;   //LSB addr=0x1AB {W,W1,W0} = {0,1,1} 6bytes of data transfer(48bit)
+                                DDS_buffer[DDS_WIDTH + 4 : DDS_WIDTH + 1] <= 4'b1000; // data_length = 8byte = DDS_data byte (2byte for header + 4byte for raw data)
                             end
 
                             else begin
-                                Err_sign <= 1'b1;
-                                DDS_buffer[FTW_WIDTH : 1] <= current_FTW_tracking[FTW_WIDTH : 1] - (K0 * difference) + (K1 * difference_buf) - (K2 * difference_buf_2);
-                            end
-
-                            DDS_buffer[DDS_WIDTH : FTW_WIDTH + 1] <= 16'h61AB;   //LSB addr=0x1AB {W,W1,W0} = {0,1,1} 6bytes of data transfer(48bit)
-                            DDS_buffer[DDS_WIDTH + 4 : DDS_WIDTH + 1] <= 4'b1000; // data_length = 8byte = DDS_data byte (2byte for header + 4byte for raw data)
+                                DDS_buffer[DDS_WIDTH + 8:1] <= user_DDS_buffer[DDS_WIDTH + 8:1];
+                            end   
                         end
 
-                        // else begin
-                        //     DDS_buffer[DDS_WIDTH + 8:1] <= user_DDS_buffer[DDS_WIDTH + 8:1];
-                        // end   
+                        else begin
+                            DDS_buffer[DDS_WIDTH + 8:1] <= user_DDS_buffer[DDS_WIDTH + 8:1];
+                        end
                     end
+                    /////////////////////////////////////////////////////////////////////////
+                    // trigger WTR
+                    else if((DDS_busy_1 == 0) && (DDS_busy_2 == 0)) begin
+                        if(COMP_on == 1'b1) begin 
+                            // update tracking frequency first
+                            dds_data_ready_1 <= 1'b1;
+                            dds_data_ready_2 <= 1'b0;
+                            // save current control variable value for photodiode tracking frequency
+                            current_FTW_tracking <= DDS_buffer[FTW_WIDTH:1];
+                        end
 
-                    // else begin
-                    //     DDS_buffer[DDS_WIDTH + 8:1] <= user_DDS_buffer[DDS_WIDTH + 8:1];
-                    // end
-                end
-                /////////////////////////////////////////////////////////////////////////
-                // trigger WTR
-                else if((DDS_busy_1 == 0) && (DDS_busy_2 == 0)) begin
-                    if(COMP_on == 1'b1) begin 
-                        // update tracking frequency first
-                        dds_data_ready_1 <= 1'b1;
-                        dds_data_ready_2 <= 1'b0;
-                        // save current control variable value for photodiode tracking frequency
-                        current_FTW_tracking <= DDS_buffer[FTW_WIDTH:1];
+                        else begin // normal dds write case
+                            if((DDS_buffer[DDS_WIDTH + 6] == 1'b1) && (DDS_buffer[DDS_WIDTH:DDS_WIDTH-15]==16'h61AB)) current_FTW_tracking <= DDS_buffer[FTW_WIDTH:1]; // save current control variable value for photodiode tracking frequency
+                            if((DDS_buffer[DDS_WIDTH + 5] == 1'b1) && (DDS_buffer[DDS_WIDTH:DDS_WIDTH-15]==16'h61AB)) current_FTW_AOM <= DDS_buffer[FTW_WIDTH:1]; // save currentcontrol variable value for AOM frequency
+                            dds_data_ready_1 <= DDS_buffer[DDS_WIDTH+6];
+                            dds_data_ready_2 <= DDS_buffer[DDS_WIDTH+5];
+                        end
                     end
-
-                    // else begin // normal dds write case
-                    //     if((DDS_buffer[DDS_WIDTH + 6] == 1'b1) && (DDS_buffer[DDS_WIDTH:DDS_WIDTH-15]==16'h61AB)) current_FTW_tracking <= DDS_buffer[FTW_WIDTH:1]; // save current control variable value for photodiode tracking frequency
-                    //     if((DDS_buffer[DDS_WIDTH + 5] == 1'b1) && (DDS_buffer[DDS_WIDTH:DDS_WIDTH-15]==16'h61AB)) current_FTW_AOM <= DDS_buffer[FTW_WIDTH:1]; // save currentcontrol variable value for AOM frequency
-                    //     dds_data_ready_1 <= DDS_buffer[DDS_WIDTH+6];
-                    //     dds_data_ready_2 <= DDS_buffer[DDS_WIDTH+5];
-                    // end
+                    /////////////////////////////////////////////////////////////////////////
+                    else begin // WTR triggered
+                        DDS_ready_flag <= 1'b0;
+                        op_state <= OP_DDS_WAIT;
+                    end
                 end
-                /////////////////////////////////////////////////////////////////////////
-                else begin // WTR triggered
-                    DDS_ready_flag <= 1'b0;
-                    op_state <= OP_DDS_WAIT;
+                else if (PID_mode == 1'b1) begin
+                    if(DDS_ready_flag == 0) begin
+                        DDS_ready_flag <= 1'b1;
+                        if(COMP_on == 1'b0) DDS_buffer[DDS_WIDTH + 8:1] <= user_DDS_buffer[DDS_WIDTH+8:1];
+                    end
+                    else if((DDS_busy_1 == 0) && (DDS_busy_2 == 0)) begin
+                        if(COMP_on == 1'b0) begin
+                            if((DDS_buffer[DDS_WIDTH + 5] == 1'b1) && (DDS_buffer[DDS_WIDTH:DDS_WIDTH-15]==16'h240C)) current_FSC_AOM <= DDS_buffer[FTW_WIDTH+FSC_WIDTH-16:FTW_WIDTH-15]; // save currentcontrol variable value for AOM frequency
+                            dds_data_ready_1 <= DDS_buffer[DDS_WIDTH+6];
+                            dds_data_ready_2 <= DDS_buffer[DDS_WIDTH+5];
+                        end
+                    end
+                    else begin
+                        DDS_ready_flag <= 1'b0;
+                        op_state <= OP_DDS_WAIT;
+                    end
                 end
             end
     
@@ -1002,8 +1045,14 @@ module main(
                 end
                 
                 else if((DDS_busy_1 == 0) && (DDS_busy_2 == 0)) begin // trigger WTR
-                    dds_data_ready_1 <= 1'b1; // PD tracking DDS first
-                    dds_data_ready_2 <= 1'b0;
+                    if(PID_mode == 1'b0) begin
+                        dds_data_ready_1 <= 1'b1; // PD tracking DDS first
+                        dds_data_ready_2 <= 1'b0;
+                    end
+                    else if (PID_mode == 1'b1) begin
+                        dds_data_ready_1 <= 1'b0; 
+                        dds_data_ready_2 <= 1'b1;
+                    end
                 end
                 
                 else begin // WTR triggered
@@ -1029,7 +1078,6 @@ module main(
                     DDS_ready_flag <= 1'b1;
                     // Divide by 2 for double pass AOM
                     // Determination of feedback direction needed (normal or reverse?)
-                    AOM_update = ((N * K0 * difference)>>1) - ((N * K1 * difference_buf)>>1) + ((N * K2 * difference_buf_2)>>1);
                     if((Err_sign == 1'b0) || (adc_out_buf > setPoint)) begin
                         if(!reverse_feedback) begin
                             if(PID_mode == 1'b0) DDS_buffer[FTW_WIDTH : 1] <= current_FTW_AOM[FTW_WIDTH : 1] + AOM_update;
@@ -1150,12 +1198,12 @@ module main(
         // assign {red1,green1,blue1} = adc_state;
         assign {red0,green0,blue0} = con_state;
        
-        // assign led[2] = ADC_on;
+        assign led[2] = ADC_on;
         // assign led[3] = COMP_on;
         // assign led[4] = DDS_on;
         // assign led[5] = wait_flag;
-        assign led[2] = adc_out[15:4]>500? 1'b1:1'b0;
-        assign led[3] = adc_out[15:4]>1000? 1'b1:1'b0;
+        // assign led[2] = adc_out[15:4]>500? 1'b1:1'b0;
+        assign led[3] = user_DDS_setting;
         assign led[4] = DDS_busy_2;
         assign led[5] = PID_mode;
         
