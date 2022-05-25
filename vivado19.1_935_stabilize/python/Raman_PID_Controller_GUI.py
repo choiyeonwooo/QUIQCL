@@ -103,13 +103,13 @@ class Raman_PID_Controller_GUI(QtWidgets.QDialog, Ui_QDialog):
         self.config_editor = TextEditor(window_title = 'Config editor')
         config_dir = dirname + '\\config'
         # self.config_filename = '%s\\%s.ini' % (config_dir, socket.gethostname())
-        self.config_filename = '%s\\%s.ini' % (config_dir, 'QC109-1')
+        self.config_filename = '%s\\%s.ini' % (config_dir, 'JIYONG-LAPTOP')
         self.config_file_label.setText(self.config_filename)
         if not os.path.exists(self.config_filename):
             copyfile('%s\\default.ini' % config_dir, self.config_filename)
             
         self.initUi()    
-        # self.reload_config()    
+        self.reload_config()    
         
     def initUi(self):
         # Configuration
@@ -195,7 +195,7 @@ class Raman_PID_Controller_GUI(QtWidgets.QDialog, Ui_QDialog):
         self.max_data_length = int((self.measure_time * 60) / self.sampling_time)
         
         # Default setting for PID controller
-        # self.PID.adc_range_select() # Vref = 4.096V, range is -2.5 * Vref ~ 2.5 * Vref
+        self.PID.adc_range_select() # Vref = 4.096V, range is -2.5 * Vref ~ 2.5 * Vref
         self.PID.user_sampling() # user sampling frequency is 20kHz (Alterable in Verilog)
 
         self.tracking_signal_on = False
@@ -388,6 +388,16 @@ class Raman_PID_Controller_GUI(QtWidgets.QDialog, Ui_QDialog):
     
     def ctrl_select(self):
         current_index = self.ctrl_variable_combobox.currentIndex()
+        if(current_index == 0):
+            self.ADC_read_button.setEnabled(True)
+            self.freq_add_button.setEnabled(True)
+            self.freq_substract_button.setEnabled(True)
+
+            self.tracking_freq_box.setEnabled(True)
+            self.tracking_power_box.setEnabled(True)
+            self.tracking_phase_box.setEnabled(True)
+            self.tracking_signal_onoff_button.setEnabled(True)
+
         if(current_index == 1):
             # current controlled
             self.ADC_read_button.setEnabled(False)

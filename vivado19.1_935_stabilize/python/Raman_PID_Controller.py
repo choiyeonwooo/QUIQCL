@@ -28,8 +28,8 @@ class Raman_PID_Controller():
         # FPGA connect and dds initialization
         self.fpga = fpga
         self.pid_mode = 0 #default: frequency control
-        self.min_freq = 0
-        self.max_freq = 500
+        self.min_freq = 0;
+        self.max_freq = 500;
         self.com = 'COM4'
         self.dds = dds(self.fpga, self.min_freq, self.max_freq)
         # self.adc = adc(self.fpga)
@@ -37,7 +37,7 @@ class Raman_PID_Controller():
         self.fpga.send_command(msg)
     
     def read_from_fpga(self):
-        print(self.fpga.read_next_message())
+        print(self.fpga.read_next_message());
     
     ##########################################
     # DDS
@@ -59,54 +59,12 @@ class Raman_PID_Controller():
         self.fpga.send_command(cmd)
         print(cmd)
 
-    # def dds_read(self, select): #select 0: freq. 1: current 2: phase
-    #     cmd = 'READ DDS'
-    #     self.fpga.send_command(cmd)
-        
-    #     self.fpga.send_mod_BTF_int_list() #1_00_addr
-    #     bit_pattern_string = ''
-    #     adcv = self.fpga.read_next_message()
-        
-    #     for eachByte in adcv[1]:                                ##vivado에 따로 읽을수 있게 만들어놓은 부분을 구현해서 사용해야함
-    #         bit_pattern_string += (format(ord(eachByte), '08b') + ' ')
-    #     print("Bit Pattern : " + bit_pattern_string)
- 
-    #     if adcv[0] != '!':
-    #         print('read_adc: Reply is not CMD type:', adcv)
-    #         return False
-
-    #     # For Analog output(16bit)
-    #     adc_voltage=self.adc_voltage_transform(ord(adcv[1][0]), ord(adcv[1][1]))
-    #     # adcv[1][2]: zero padding
-
-    #     # PD Tracking control variable(48bit)    
-    #     CVAR_Tracking_raw = (ord(adcv[1][3]) << 40) + (ord(adcv[1][4]) << 32) + (ord(adcv[1][5]) << 24) + (ord(adcv[1][6]) << 16) + (ord(adcv[1][7]) << 8) + (ord(adcv[1][8]))
-        
-    #     # AOM control variable      
-    #     CVAR_AOM_raw = (ord(adcv[1][9]) << 40) + (ord(adcv[1][10]) << 32) + (ord(adcv[1][11]) << 24) + (ord(adcv[1][12]) << 16) + (ord(adcv[1][13]) << 8) + (ord(adcv[1][14]))
-    #     # print("ADC_RESULT: ",adc_voltage,"\n") 
-    #     data= [adc_voltage, CVAR_Tracking_raw, CVAR_AOM_raw]
-    #     # data = self.adc.adc_load_data()
-
-    #     if(self.pid_mode == 0): # output frequency of DDS
-    #         CVAR_Tracking = (data[1] * Fs) / ((2 ** CVAR_bit) * (10 ** 6)) #MHz
-    #         CVAR_AOM = (data[2] * Fs) / ((2 ** CVAR_bit) * (10 ** 6))
-    #     elif(self.pid_mode == 1): # output current of DDS
-    #         CVAR_Tracking = 0
-    #         # CVAR_Tracking = Iref * ( 72 + 192 * data[1] / 1024)
-    #         CVAR_AOM = Iref * ( 72 + 192 * data[2] / 1024)
-    #         # CVAR_AOM = data[2]
-    #     # elif(self.pid_mode == 2): # output phase of DDS
-    #         # CVAR_Tracking
-        
-    #     return [data[0], CVAR_Tracking, CVAR_AOM]
-
     def set_frequency(self, freq_in_MHz, ch1, ch2): #48bit
         if (freq_in_MHz < self.min_freq) or (freq_in_MHz > self.max_freq):
             print('Error in set_frequency: frequency should be between' +  str(self.min_freq) + 'and' + str(self.max_freq) + 'MHz')
             raise ValueError(freq_in_MHz)
         
-        # self.dds_start()
+        self.dds_start()
         cmd = 'WRITE DDS REG'
         cmd_up = 'UPDATE'
          
@@ -123,7 +81,7 @@ class Raman_PID_Controller():
             print('Error in set_current: current should be between 0 and 0x3ff')
             raise ValueError(current)
         # real current value is... (1.2 / Rref ) * ( 72 + 192 * current / 1024)
-        # self.dds_start()
+        self.dds_start()
         cmd = 'WRITE DDS REG'
         cmd_up = 'UPDATE'
         
@@ -139,7 +97,7 @@ class Raman_PID_Controller():
         # Convert phase for DDS
         phase = int(phase * (2**14) / (2 * np.pi))
         
-        # self.dds_start()
+        self.dds_start()
         cmd = 'WRITE DDS REG'
         cmd_up = 'UPDATE'
         
@@ -155,30 +113,27 @@ class Raman_PID_Controller():
         self.fpga.send_command(cmd_up)
         self.fpga.send_mod_BTF_int_list(self.dds.make_9int_list('000501', ch1, ch2)) # Update the buffered (mirrored) registers
         self.fpga.send_command(cmd)
-        # self.dds_stop()
     
     def power_down(self, ch1, ch2):
         # Digital powerdown
-        # self.dds_start()
+        self.dds_start()
         cmd = 'WRITE DDS REG'
         cmd_up = 'UPDATE'
         
         self.fpga.send_command(cmd_up)
         self.fpga.send_mod_BTF_int_list(self.dds.make_9int_list(self.dds.make_header_string(0x0010, 1)+'91', ch1, ch2))
         self.fpga.send_command(cmd)
-        # self.dds_stop()
         print('Power down(%d, %d)' %(ch1, ch2))
      
     def power_up(self, ch1, ch2):
         # Digital powerup
-        # self.dds_start()
+        self.dds_start()
         cmd = 'WRITE DDS REG'
         cmd_up = 'UPDATE'
         
         self.fpga.send_command(cmd_up)
         self.fpga.send_mod_BTF_int_list(self.dds.make_9int_list(self.dds.make_header_string(0x0010, 1)+'90', ch1, ch2))
         self.fpga.send_command(cmd)
-        # self.dds_stop()
         print('Power up(%d, %d)' %(ch1, ch2))
     
     ##########################################
@@ -207,13 +162,13 @@ class Raman_PID_Controller():
         self.pid_mode = mode
         cmd = 'COMP PID MODE'
         cmd_up = 'UPDATE'
-        # self.dds_stop()
+        self.dds_stop()
 
         self.fpga.send_command(cmd_up)
         self.fpga.send_mod_BTF_int_list([mode])
         self.fpga.send_command(cmd)
 
-        # self.dds_start()
+        self.dds_start()
 
         print(cmd)
 
@@ -225,7 +180,7 @@ class Raman_PID_Controller():
         #3byte message(0: 2**15 upper, 1: 2**8~2**15, 2: 0~2**8)
         
         # stop DDS 
-        # self.dds_stop()
+        self.dds_stop()
         
         self.fpga.send_command(cmd_up)
         self.fpga.send_mod_BTF_int_list(message)
@@ -237,7 +192,7 @@ class Raman_PID_Controller():
         self.fpga.send_command('WRITE DDS REG')
         
         # start DDS
-        # self.dds_start()
+        self.dds_start()
         
         print(cmd)
 
@@ -248,7 +203,7 @@ class Raman_PID_Controller():
         message = [code // 65536, (code % 65536) // 256, code % 256]
 
         # stop DDS 
-        # self.dds_stop()
+        self.dds_stop()
         
         self.fpga.send_command(cmd_up)
         self.fpga.send_mod_BTF_int_list(message)
@@ -260,7 +215,7 @@ class Raman_PID_Controller():
         self.fpga.send_command('WRITE DDS REG')
         
         # start DDS
-        # self.dds_start()
+        self.dds_start()
         
         print(cmd)   
         
@@ -271,7 +226,7 @@ class Raman_PID_Controller():
         message = [code // 65536, (code % 65536) // 256, code % 256]
         
         # stop DDS
-        # self.dds_stop()
+        self.dds_stop()
         
         self.fpga.send_command(cmd_up)
         self.fpga.send_mod_BTF_int_list(message)
@@ -283,7 +238,7 @@ class Raman_PID_Controller():
         self.fpga.send_command('WRITE DDS REG')
         
         # start DDS
-        # self.dds_start()
+        self.dds_start()
      
         print(cmd)
     
@@ -304,7 +259,7 @@ class Raman_PID_Controller():
         message = [code//65536,(code%65536) // 256, code % 256]
         
         # stop dds
-        # self.dds_stop()
+        self.dds_stop()
         
         self.fpga.send_command(cmd_up)
         self.fpga.send_mod_BTF_int_list(message)
@@ -317,7 +272,7 @@ class Raman_PID_Controller():
         self.fpga.send_command('WRITE DDS REG')
         
         # start dds
-        # self.dds_start()
+        self.dds_start()
         print(message)
         print(cmd)    
         
@@ -428,8 +383,8 @@ class Raman_PID_Controller():
         elif(self.pid_mode == 1): # output current of DDS
             CVAR_Tracking = 0
             # CVAR_Tracking = Iref * ( 72 + 192 * data[1] / 1024)
-            CVAR_AOM = Iref * ( 72 + 192 * data[2] / 1024)
-            # CVAR_AOM = data[2]
+            # CVAR_AOM = Iref * ( 72 + 192 * data[2] / 1024)
+            CVAR_AOM = data[2]
         # elif(self.pid_mode == 2): # output phase of DDS
             # CVAR_Tracking
         

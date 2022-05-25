@@ -520,7 +520,8 @@ module main(
         load_large_start<= 1'b0;
         TX_buffer1_ready <= 1'b0;
         TX_buffer2_ready <= 1'b0;
-        
+        PID_mode <= 1'b0;
+        user_DDS_setting <= 1'b0;
         load_data_buffer <= 0;
         load_large_data_buffer <= 0;
         reverse_feedback <= 1'b0;
@@ -637,7 +638,7 @@ module main(
                             end
 
                             else if((DDS1_update != 0) || (DDS2_update != 0)) begin
-                                user_DDS_buffer <= BTF_Buffer[DDS_WIDTH+8:1]; 
+                                user_DDS_buffer[DDS_WIDTH+8:1] <= BTF_Buffer[DDS_WIDTH+8:1]; 
                                 user_DDS_setting <= 1'b1;
                                 // BTF_Buffer contains..
                                 // '#'+'digits # of following info'+'byte # of raw data'+'raw data'
@@ -948,6 +949,7 @@ module main(
                     if(PID_mode == 1'b0) op_state <= OP_DDS;
                     else if (PID_mode == 1'b1) op_state <= OP_AOM_Feedback;
                 end
+                else if (DDS_on == 1'b1) op_state <= OP_DDS;
                 else op_state <= OP_WAIT;
             end
             
@@ -1032,7 +1034,10 @@ module main(
                 end
             
                 else begin // writing process done
-                    if(COMP_on == 1) op_state <= OP_COMP_UPDATE_1; // Mirroed register update needed for final update
+                    if(COMP_on == 1) begin
+                        if(PID_mode == 1'b0) op_state <= OP_COMP_UPDATE_1; // Mirroed register update needed for final update
+                        else if (PID_mode == 1'b1) op_state <= OP_AOM_Feedback;
+                    end
                     else op_state <= OP_WAIT;
                 end
             end  
@@ -1045,14 +1050,8 @@ module main(
                 end
                 
                 else if((DDS_busy_1 == 0) && (DDS_busy_2 == 0)) begin // trigger WTR
-                    if(PID_mode == 1'b0) begin
-                        dds_data_ready_1 <= 1'b1; // PD tracking DDS first
-                        dds_data_ready_2 <= 1'b0;
-                    end
-                    else if (PID_mode == 1'b1) begin
-                        dds_data_ready_1 <= 1'b0; 
-                        dds_data_ready_2 <= 1'b1;
-                    end
+                    dds_data_ready_1 <= 1'b1; // PD tracking DDS first
+                    dds_data_ready_2 <= 1'b0;
                 end
                 
                 else begin // WTR triggered
