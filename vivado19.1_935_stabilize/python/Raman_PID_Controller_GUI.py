@@ -81,11 +81,11 @@ class Raman_PID_Controller_GUI(QtWidgets.QDialog, Ui_QDialog):
     def __init__(self, parent=None, connection_callback=None):
         
         # FPGA connect and initialization
-        self.fpga = ArtyS7('COM8') 
+        self.fpga = ArtyS7('COM10') 
         self.fpga.print_idn()
         
-        dna_string = self.fpga.read_DNA()
-        print('FPGA DNA string:', dna_string)
+        # dna_string = self.fpga.read_DNA()
+        # print('FPGA DNA string:', dna_string)
         
         self.PID = Raman_PID_Controller(self.fpga)
     
@@ -103,13 +103,13 @@ class Raman_PID_Controller_GUI(QtWidgets.QDialog, Ui_QDialog):
         self.config_editor = TextEditor(window_title = 'Config editor')
         config_dir = dirname + '\\config'
         # self.config_filename = '%s\\%s.ini' % (config_dir, socket.gethostname())
-        self.config_filename = '%s\\%s.ini' % (config_dir, 'JIYONG-LAPTOP')
+        self.config_filename = '%s\\%s.ini' % (config_dir, 'LAPTOP-JIYONG')
         self.config_file_label.setText(self.config_filename)
         if not os.path.exists(self.config_filename):
             copyfile('%s\\default.ini' % config_dir, self.config_filename)
             
         self.initUi()    
-        self.reload_config()    
+        # self.reload_config()    
         
     def initUi(self):
         # Configuration
@@ -147,7 +147,8 @@ class Raman_PID_Controller_GUI(QtWidgets.QDialog, Ui_QDialog):
             self.ctrl_variable_combobox.insertItem(i, self.ctrl_variable_list[i])    
         self.ctrl_variable_combobox.setCurrentIndex(cvar_number)
         self.ctrl_variable_combobox.currentIndexChanged.connect(self.ctrl_select)
-            
+        # self.ctrl_variable_combobox.currentIndexChanged.connect(self.PID.set_pid_mode(self.ctrl_variable_combobox.currentIndex()))    
+        print("pid mode: ", self.ctrl_variable_combobox.currentIndex())
         # Manual Lock setting
         self.ADC_read_button.clicked.connect(self.ADC_read) # to adjust frequency of PD tracking DDS
         self.freq_add_button.clicked.connect(self.freq_add)
@@ -232,7 +233,9 @@ class Raman_PID_Controller_GUI(QtWidgets.QDialog, Ui_QDialog):
         # Beam geometry configuration
         geometry_index_saved = int(self.config['beam_geometry']['index_saved'])
         self.beam_geometry_combobox.setCurrentIndex(geometry_index_saved)
-                
+        
+        pid_mode_index_saved = int(self.config['control_variable']['index_saved'])
+        self.ctrl_variable_combobox.setCurrentIndex(pid_mode_index_saved)
         # Signal configuration
         # Tracking signal
         tracking_freq_saved = float(self.config['tracking_signal']['tracking_freq_saved'])
@@ -388,6 +391,8 @@ class Raman_PID_Controller_GUI(QtWidgets.QDialog, Ui_QDialog):
     
     def ctrl_select(self):
         current_index = self.ctrl_variable_combobox.currentIndex()
+        print("current index: ", current_index)
+        self.PID.set_pid_mode(current_index)
         if(current_index == 0):
             self.ADC_read_button.setEnabled(True)
             self.freq_add_button.setEnabled(True)
@@ -398,7 +403,7 @@ class Raman_PID_Controller_GUI(QtWidgets.QDialog, Ui_QDialog):
             self.tracking_phase_box.setEnabled(True)
             self.tracking_signal_onoff_button.setEnabled(True)
 
-        if(current_index == 1):
+        elif(current_index == 1):
             # current controlled
             self.ADC_read_button.setEnabled(False)
             self.freq_add_button.setEnabled(False)
@@ -409,7 +414,6 @@ class Raman_PID_Controller_GUI(QtWidgets.QDialog, Ui_QDialog):
             self.tracking_phase_box.setEnabled(False)
             self.tracking_signal_onoff_button.setEnabled(False)
 
-        self.PID.set_pid_mode(current_index)
 
     ################################### Manual Lock manipulation ############################################################
     def ADC_read(self):

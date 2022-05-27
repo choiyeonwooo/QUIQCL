@@ -254,16 +254,10 @@ module main(
     WriteToRegister WTR1(.DDS_clock(DDS_clock), .dataLength(data_length[3:0]), .registerData(DDS_data), .registerDataReady(dds_data_ready_1), .busy(DDS_busy_1),
                                 .wr_rcsbar(rcsbar_1), /*.rsclk(rsclk00),*/ .rsdio(rsdio_1), .pidMode(PID_mode) ); //, .extendedDataReady(extendedDataReady00));   //, .countmonitor(monitor00), .registerDataReadymonitor(RDataReadymonitor00)
                                 //);
-    defparam WTR1.FTW_WIDTH = FTW_WIDTH;
-    defparam WTR1.FSC_WIDTH = FSC_WIDTH;
-    defparam WTR1.PHASE_WIDTH = PHASE_WIDTH;
 
     WriteToRegister WTR2(.DDS_clock(DDS_clock), .dataLength(data_length[3:0]), .registerData(DDS_data), .registerDataReady(dds_data_ready_2), .busy(DDS_busy_2),
                                 .wr_rcsbar(rcsbar_2), /*.rsclk(rsclk00),*/ .rsdio(rsdio_2), .pidMode(PID_mode) ); //, .extendedDataReady(extendedDataReady00));   //, .countmonitor(monitor00), .registerDataReadymonitor(RDataReadymonitor00)
                                 //);
-    defparam WTR2.FTW_WIDTH = FTW_WIDTH;
-    defparam WTR2.FSC_WIDTH = FSC_WIDTH;
-    defparam WTR2.PHASE_WIDTH = PHASE_WIDTH;
 
     reg DDS1_powerdown, DDS2_powerdown, DDS_reset;
    
@@ -510,7 +504,10 @@ module main(
     reg load_finish, load_large_finish;
     reg DDS_ready_flag;
     reg [48 + 48 + 16 - 1:0] load_data_buffer; // data_buffer : PD tracking CVAR + AOM CVAR + ADC data (112bit < 15byte) -> transfer via tx_buffer1
-    reg [42:0] AOM_update; // update frequency/current with this value and route in to DDS_buffer
+    wire [42:0] AOM_update_freq; // update frequency/current with this value and route in to DDS_buffer
+    wire [36:0] AOM_update_current;
+    assign AOM_update_freq = ((N * K0 * difference)>>1) - ((N * K1 * difference_buf)>>1) + ((N * K2 * difference_buf_2)>>1);
+    assign AOM_update_current = ((K0 * difference)>>1) - ( (K1*difference_buf)>>1) + ((K2*difference_buf_2)>>1);
     initial begin
         con_state <= CON_WAIT;
         update_request <= 1'b0;
@@ -1074,7 +1071,10 @@ module main(
                 end
             
                 else begin // writing process done
-                    if(COMP_on == 1) op_state <= OP_COMP_UPDATE_1; // Mirroed register update needed for final update
+                    if(COMP_on == 1) begin
+                        if(PID_mode == 1'b0)op_state <= OP_COMP_UPDATE_1; // Mirroed register update needed for final update
+                        else if (PID_mode == 1'b1) op_state <= OP_AOM_Feedback;
+                    end
                     else op_state <= OP_WAIT;
                 end
             end  
@@ -1120,40 +1120,39 @@ module main(
                     DDS_ready_flag <= 1'b1;
                     // Divide by 2 for double pass AOM
                     // Determination of feedback direction needed (normal or reverse?)
-                    AOM_update = ((N * K0 * difference)>>1) - ((N * K1 * difference_buf)>>1) + ((N * K2 * difference_buf_2)>>1);
                     if((Err_sign == 1'b0) || (adc_out_buf > setPoint)) begin
                         if(!reverse_feedback) begin
-                            if(PID_mode == 1'b0) DDS_buffer[FTW_WIDTH : 1] <= current_FTW_AOM[FTW_WIDTH : 1] + AOM_update;
+                            if(PID_mode == 1'b0) DDS_buffer[FTW_WIDTH : 1] <= current_FTW_AOM[FTW_WIDTH : 1] + AOM_update_freq;
                             else if (PID_mode == 1'b1) begin
-                                if((^AOM_update[42:10] == 1'b1) || ( AOM_update[9] && current_FSC_AOM[FSC_WIDTH] == 1'b1)) DDS_buffer[FTW_WIDTH : (FTW_WIDTH - 15)] <= {{6{1'b0}}, {10{1'b1}}}; // overflow
+                                if((^AOM_update_current[36:10] == 1'b1) || ( AOM_update_current[9] && current_FSC_AOM[FSC_WIDTH] == 1'b1)) DDS_buffer[FTW_WIDTH : (FTW_WIDTH - 15)] <= {{6{1'b0}}, {10{1'b1}}}; // overflow
                                 else begin
-                                    DDS_buffer[FTW_WIDTH : FTW_WIDTH - 15] <= current_FSC_AOM[FSC_WIDTH : 1] + AOM_update;
+                                    DDS_buffer[FTW_WIDTH : FTW_WIDTH - 15] <= current_FSC_AOM[FSC_WIDTH : 1] + AOM_update_current;
                                 end
                             end
                         end
                         else begin
-                            if(PID_mode == 1'b0) DDS_buffer[FTW_WIDTH : 1] <= current_FTW_AOM[FTW_WIDTH : 1] - AOM_update; //underflow
+                            if(PID_mode == 1'b0) DDS_buffer[FTW_WIDTH : 1] <= current_FTW_AOM[FTW_WIDTH : 1] - AOM_update_freq; 
                             else if (PID_mode == 1'b1) begin
-                                if(AOM_update > current_FTW_AOM) DDS_buffer[FTW_WIDTH : 1] <= 1'b0;
-                                else DDS_buffer[FTW_WIDTH : FTW_WIDTH - 15] <= current_FSC_AOM[FSC_WIDTH : 1] - AOM_update;
+                                if(AOM_update_current > current_FTW_AOM) DDS_buffer[FTW_WIDTH : 1] <= 1'b0; //underflow
+                                else DDS_buffer[FTW_WIDTH : FTW_WIDTH - 15] <= current_FSC_AOM[FSC_WIDTH : 1] - AOM_update_current;
                             end
                         end
                     end
 
                     else begin
                         if(!reverse_feedback) begin
-                            if(PID_mode == 1'b0) DDS_buffer[FTW_WIDTH : 1] <= current_FTW_AOM[FTW_WIDTH : 1] - AOM_update; //underflow
+                            if(PID_mode == 1'b0) DDS_buffer[FTW_WIDTH : 1] <= current_FTW_AOM[FTW_WIDTH : 1] - AOM_update_freq; 
                             else if (PID_mode == 1'b1) begin
-                                if(AOM_update > current_FTW_AOM) DDS_buffer[FTW_WIDTH : 1] <= 1'b0;
-                                else DDS_buffer[FTW_WIDTH : FTW_WIDTH - 15] <= current_FSC_AOM[FSC_WIDTH : 1] - AOM_update;
+                                if(AOM_update_current > current_FTW_AOM) DDS_buffer[FTW_WIDTH : 1] <= 1'b0;//underflow
+                                else DDS_buffer[FTW_WIDTH : FTW_WIDTH - 15] <= current_FSC_AOM[FSC_WIDTH : 1] - AOM_update_current;
                             end
                         end
                         else begin
-                            if(PID_mode == 1'b0) DDS_buffer[FTW_WIDTH : 1] <= current_FTW_AOM[FTW_WIDTH : 1] + AOM_update;
+                            if(PID_mode == 1'b0) DDS_buffer[FTW_WIDTH : 1] <= current_FTW_AOM[FTW_WIDTH : 1] + AOM_update_freq;
                             else if (PID_mode == 1'b1) begin
-                                if((^AOM_update[42:10] == 1'b1) || ( AOM_update[9] && current_FSC_AOM[FSC_WIDTH] == 1'b1)) DDS_buffer[FTW_WIDTH : FTW_WIDTH - 15] <= {{6{1'b0}}, {10{1'b1}}}; // overflow
+                                if((^AOM_update_current[36:10] == 1'b1) || ( AOM_update_current[9] && current_FSC_AOM[FSC_WIDTH] == 1'b1)) DDS_buffer[FTW_WIDTH : FTW_WIDTH - 15] <= {{6{1'b0}}, {10{1'b1}}}; // overflow
                                 else begin
-                                    DDS_buffer[FTW_WIDTH : FTW_WIDTH - 15] <= current_FSC_AOM[FSC_WIDTH : 1] + AOM_update;
+                                    DDS_buffer[FTW_WIDTH : FTW_WIDTH - 15] <= current_FSC_AOM[FSC_WIDTH : 1] + AOM_update_current;
                                 end
                             end
                         end

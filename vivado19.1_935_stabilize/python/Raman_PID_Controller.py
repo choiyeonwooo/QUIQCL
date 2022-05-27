@@ -379,12 +379,12 @@ class Raman_PID_Controller():
 
         if(self.pid_mode == 0): # output frequency of DDS
             CVAR_Tracking = (data[1] * Fs) / ((2 ** CVAR_bit) * (10 ** 6)) #MHz
-            CVAR_AOM = (data[2] * Fs) / ((2 ** CVAR_bit) * (10 ** 6))
+            CVAR_AOM = data[2]
         elif(self.pid_mode == 1): # output current of DDS
             CVAR_Tracking = 0
             # CVAR_Tracking = Iref * ( 72 + 192 * data[1] / 1024)
             # CVAR_AOM = Iref * ( 72 + 192 * data[2] / 1024)
-            CVAR_AOM = data[2]
+            CVAR_AOM = ((ord(adcv[1][13])%4) << 8) + (ord(adcv[1][14]))
         # elif(self.pid_mode == 2): # output phase of DDS
             # CVAR_Tracking
         
